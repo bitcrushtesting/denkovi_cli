@@ -103,21 +103,80 @@ def discover_devices(*, all_ports: bool = False) -> list[Device]:
     return sorted(devices, key=lambda device: device.port)
 
 
-def resolve_port(port: str | None) -> str:
-    """Return the port to talk to, auto-detecting when one was not given."""
-    if port is not None:
-        return port
+def resolve_device(port: str | None = None, serial_number: str | None = None) -> Device:
+    """Return the board to talk to.
+
+    A serial number picks one out of several connected boards, a port names one
+    directly, and with neither the single connected board is used.
+    """
+    if port is not None and serial_number is not None:
+        raise DenkoviError("--port and --serial cannot be used together.")
 
     devices = discover_devices()
+
+    if serial_number is not None:
+        return _match_serial(devices, serial_number)
+
+    if port is not None:
+        # A port may legitimately name a board that discovery did not recognise,
+        # so fall back to a device that carries nothing but the port.
+        for device in devices:
+            if device.port == port:
+                return device
+        return Device(
+            port=port,
+            serial_number=None,
+            description="",
+            manufacturer=None,
+            vendor_id=None,
+            product_id=None,
+        )
+
     if not devices:
         raise DenkoviError(
             "no Denkovi board found. Check that it is plugged in, or pass "
             "--port explicitly ('denkovi list --all' shows every serial port)."
         )
     if len(devices) > 1:
-        ports = ", ".join(device.port for device in devices)
-        raise DenkoviError(f"several Denkovi boards found ({ports}). Pass --port to pick one.")
-    return devices[0].port
+        raise DenkoviError(
+            f"several Denkovi boards found. Pick one with --serial:\n{_describe(devices)}"
+        )
+    return devices[0]
+
+
+def _match_serial(devices: list[Device], serial_number: str) -> Device:
+    """Find the one board whose serial number the user meant.
+
+    Matching is case insensitive, as it is in the underlying library, and an
+    unambiguous prefix is accepted so long serials need not be typed in full.
+    """
+    wanted = serial_number.upper()
+    serials = [(device, (device.serial_number or "").upper()) for device in devices]
+
+    matches = [device for device, found in serials if found == wanted]
+    if not matches:
+        matches = [device for device, found in serials if found.startswith(wanted)]
+
+    if not matches:
+        if not devices:
+            raise DenkoviError(
+                f"no board with serial {serial_number!r}: no Denkovi board is connected."
+            )
+        raise DenkoviError(
+            f"no board with serial {serial_number!r}. Connected boards:\n{_describe(devices)}"
+        )
+    if len(matches) > 1:
+        raise DenkoviError(
+            f"serial {serial_number!r} matches several boards:\n{_describe(matches)}\n"
+            "Give more of the serial number."
+        )
+    return matches[0]
+
+
+def _describe(devices: list[Device]) -> str:
+    return "\n".join(
+        f"  {device.serial_number or '(no serial)':<16} {device.port}" for device in devices
+    )
 
 
 def probe_board_type(port: str, *, timeout: float = 1.0) -> str | None:
@@ -168,10 +227,20 @@ class Board:
     underlying library.
     """
 
-    def __init__(self, handle: dae_RelayBoard.DAE_RelayBoard, port: str, board_type: str) -> None:
+    def __init__(
+        self, handle: dae_RelayBoard.DAE_RelayBoard, device: Device, board_type: str
+    ) -> None:
         self._handle = handle
-        self.port = port
+        self.device = device
         self.board_type = board_type
+
+    @property
+    def port(self) -> str:
+        return self.device.port
+
+    @property
+    def serial_number(self) -> str | None:
+        return self.device.serial_number
 
     @property
     def num_relays(self) -> int:
@@ -228,12 +297,13 @@ def mask_to_states(mask: int, num_relays: int) -> dict[int, bool]:
 
 @contextlib.contextmanager
 def open_board(
-    port: str,
+    device: Device,
     board_type: str,
     *,
     delay: float = DEFAULT_DELAY,
 ) -> Iterator[Board]:
     """Connect to a board, and disconnect again however the block exits."""
+    port = device.port
     if board_type in D2XX_BOARD_TYPES and not _has_d2xx_support():
         raise DenkoviError(
             f"the {board_type} board is driven through the FTDI D2XX driver, which the "
@@ -249,7 +319,7 @@ def open_board(
     except dae_RelayBoard_Common.Denkovi_Exception as error:
         raise DenkoviError(f"could not connect to the board on {port}: {error}") from error
 
-    board = Board(handle, port, board_type)
+    board = Board(handle, device, board_type)
     try:
         yield board
     except dae_RelayBoard_Common.Denkovi_Exception as error:

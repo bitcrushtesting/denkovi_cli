@@ -26,18 +26,33 @@ def no_devices(monkeypatch: pytest.MonkeyPatch) -> None:
     _fake_discovery(monkeypatch, [])
 
 
-@pytest.fixture
-def one_device(monkeypatch: pytest.MonkeyPatch) -> Device:
-    device = Device(
-        port="/dev/ttyUSB0",
-        serial_number="DAE007Ej",
+def _device(port: str, serial_number: str | None) -> Device:
+    return Device(
+        port=port,
+        serial_number=serial_number,
         description="FT232R USB UART",
         manufacturer="Denkovi",
         vendor_id=0x0403,
         product_id=0x6001,
     )
+
+
+@pytest.fixture
+def one_device(monkeypatch: pytest.MonkeyPatch) -> Device:
+    device = _device("/dev/ttyUSB0", "DAE007Ej")
     _fake_discovery(monkeypatch, [device])
     return device
+
+
+@pytest.fixture
+def three_devices(monkeypatch: pytest.MonkeyPatch) -> list[Device]:
+    devices = [
+        _device("/dev/ttyUSB0", "DAE007Ej"),
+        _device("/dev/ttyUSB1", "DAE00ABC"),
+        _device("/dev/ttyUSB2", "DAE00ABD"),
+    ]
+    _fake_discovery(monkeypatch, devices)
+    return devices
 
 
 class TestList:
@@ -77,6 +92,74 @@ class TestList:
                 "denkovi": True,
             }
         ]
+
+
+class TestSelectBySerial:
+    """Picking one board out of several with --serial."""
+
+    def test_exact_serial(self, three_devices: list[Device]) -> None:
+        assert board_module.resolve_device(serial_number="DAE00ABC").port == "/dev/ttyUSB1"
+
+    def test_serial_is_case_insensitive(self, three_devices: list[Device]) -> None:
+        assert board_module.resolve_device(serial_number="dae00abc").port == "/dev/ttyUSB1"
+
+    def test_unambiguous_prefix_is_enough(self, three_devices: list[Device]) -> None:
+        assert board_module.resolve_device(serial_number="DAE007").port == "/dev/ttyUSB0"
+
+    def test_exact_match_wins_over_a_prefix(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        # "DAE00A" is both a whole serial and a prefix of the other two.
+        _fake_discovery(
+            monkeypatch,
+            [
+                _device("/dev/ttyUSB0", "DAE00A"),
+                _device("/dev/ttyUSB1", "DAE00AB"),
+                _device("/dev/ttyUSB2", "DAE00ABC"),
+            ],
+        )
+        assert board_module.resolve_device(serial_number="DAE00A").port == "/dev/ttyUSB0"
+
+    def test_ambiguous_prefix_is_refused(self, three_devices: list[Device]) -> None:
+        with pytest.raises(board_module.DenkoviError) as error:
+            board_module.resolve_device(serial_number="DAE00AB")
+        message = str(error.value)
+        assert "matches several boards" in message
+        assert "DAE00ABC" in message and "DAE00ABD" in message
+        assert "DAE007Ej" not in message  # only the candidates, not every board
+
+    def test_unknown_serial_lists_what_is_connected(self, three_devices: list[Device]) -> None:
+        with pytest.raises(board_module.DenkoviError) as error:
+            board_module.resolve_device(serial_number="NOPE")
+        message = str(error.value)
+        assert "no board with serial 'NOPE'" in message
+        for device in three_devices:
+            assert device.serial_number in message
+
+    def test_port_still_works(self, three_devices: list[Device]) -> None:
+        device = board_module.resolve_device(port="/dev/ttyUSB2")
+        assert device.serial_number == "DAE00ABD"
+
+    def test_unknown_port_is_used_as_given(self, three_devices: list[Device]) -> None:
+        device = board_module.resolve_device(port="/dev/ttyS9")
+        assert device.port == "/dev/ttyS9"
+        assert device.serial_number is None
+
+    def test_port_and_serial_together_are_refused(self, three_devices: list[Device]) -> None:
+        with pytest.raises(board_module.DenkoviError, match="cannot be used together"):
+            board_module.resolve_device(port="/dev/ttyUSB0", serial_number="DAE007Ej")
+
+    def test_argparse_refuses_port_and_serial_together(self) -> None:
+        with pytest.raises(SystemExit) as exit_info:
+            cli.main(["--port", "/dev/ttyUSB0", "--serial", "DAE007Ej", "status"])
+        assert exit_info.value.code == 2
+
+    def test_several_boards_without_a_selector_names_them_all(
+        self, three_devices: list[Device], capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        assert cli.main(["status"]) == cli.EXIT_ERROR
+        message = capsys.readouterr().err
+        assert "--serial" in message
+        for device in three_devices:
+            assert device.serial_number in message
 
 
 class TestErrors:

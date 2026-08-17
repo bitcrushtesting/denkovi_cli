@@ -6,7 +6,7 @@ Command line control of [Denkovi](https://denkovi.com) USB relay boards.
 
 ```console
 $ denkovi on 1,3
-type16 on /dev/cu.usbserial-DAE007Ej, 16 relays
+type16 DAE007Ej on /dev/cu.usbserial-DAE007Ej, 16 relays
  1 ●  ON    2 ○  off   3 ●  ON    4 ○  off
  5 ○  off   6 ○  off   7 ○  off   8 ○  off
  9 ○  off  10 ○  off  11 ○  off  12 ○  off
@@ -100,15 +100,57 @@ uv run denkovi --json status | jq '.relays["1"]'
 
 | Option | Meaning |
 | --- | --- |
-| `-p`, `--port` | Serial port of the board. Defaults to the one connected Denkovi board. |
+| `-s`, `--serial` | Serial number of the board, for when several are connected. |
+| `-p`, `--port` | Serial port of the board. Mutually exclusive with `--serial`. |
 | `-b`, `--board` | `type4`, `type8` or `type16`. Defaults to probing the board. |
 | `--delay` | Seconds between board commands, type16 only. Default `0.05`. |
 | `--json` | Machine readable output. |
 | `--no-color` | Never colourise, whether or not the output is a terminal. |
 
-Boards are found by their FTDI serial number, which Denkovi programs to start with
-`DAE`. If a board's chip was reflashed with a different serial number, find it with
-`denkovi list --all` and pass `--port` yourself.
+With exactly one board connected, neither `--serial` nor `--port` is needed.
+
+### Several boards at once
+
+`denkovi list` prints the serial number of every connected board:
+
+```console
+$ denkovi list
+SERIAL    PORT          DESCRIPTION
+DAE007Ej  /dev/ttyUSB0  FT232R USB UART
+DAE00ABC  /dev/ttyUSB1  FT232R USB UART
+DAE00ABD  /dev/ttyUSB2  FT232R USB UART
+```
+
+Pass one to `--serial` to pick that board:
+
+```sh
+denkovi --serial DAE00ABC on 1
+denkovi -s dae00abc on 1        # case insensitive
+denkovi -s DAE00ABC toggle 1-4
+```
+
+An unambiguous prefix is enough, so `-s DAE007` is the same as `-s DAE007Ej` above.
+If a prefix matches more than one board the command refuses rather than guessing,
+and names the candidates.
+
+Prefer `--serial` over `--port` when more than one board is connected: serial numbers
+are burned into the FTDI chip and stay put, while port names (`/dev/ttyUSB0`, `COM3`)
+depend on the order the boards were enumerated in and can move between reboots.
+
+Running a command with several boards connected and no selector is an error that
+lists what it found:
+
+```console
+$ denkovi status
+denkovi: error: several Denkovi boards found. Pick one with --serial:
+  DAE007Ej         /dev/ttyUSB0
+  DAE00ABC         /dev/ttyUSB1
+  DAE00ABD         /dev/ttyUSB2
+```
+
+Boards are recognised by their FTDI serial number, which Denkovi programs to start
+with `DAE`. If a board's chip was reflashed with a serial number that does not,
+find it with `denkovi list --all` and address it by `--port`.
 
 Board type is probed by asking the board for its state: only the 16 relay board
 answers. The 4 and 8 relay boards are silent and indistinguishable from each other,

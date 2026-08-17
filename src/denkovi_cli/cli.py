@@ -27,7 +27,7 @@ from .board import (
     mask_to_states,
     open_board,
     resolve_board_type,
-    resolve_port,
+    resolve_device,
     states_to_mask,
 )
 from .relays import (
@@ -68,10 +68,23 @@ def build_parser() -> argparse.ArgumentParser:
         formatter_class=argparse.RawDescriptionHelpFormatter,
     )
     parser.add_argument("--version", action="version", version=f"denkovi {__version__}")
-    parser.add_argument(
+
+    # A board is named either by its port or by its serial number, never both.
+    which = parser.add_mutually_exclusive_group()
+    which.add_argument(
         "-p",
         "--port",
         help="serial port of the board (default: the single connected Denkovi board)",
+    )
+    which.add_argument(
+        "-s",
+        "--serial",
+        metavar="SERIAL",
+        help=(
+            "serial number of the board, for when several are connected; "
+            "case insensitive, and an unambiguous prefix is enough "
+            "('denkovi list' shows them)"
+        ),
     )
     parser.add_argument(
         "-b",
@@ -186,11 +199,17 @@ def command_list(args: argparse.Namespace) -> int:
         print(f"No {what} found.")
         return 0
 
-    for device in devices:
-        print(device.port)
-        print(f"    serial       {device.serial_number or '-'}")
-        print(f"    description  {device.description}")
-        print(f"    manufacturer {device.manufacturer or '-'}")
+    # Serial first: it is what --serial takes, and it is stable across reboots
+    # in a way the port name is not.
+    rows = [
+        (device.serial_number or "-", device.port, device.description or "-") for device in devices
+    ]
+    headers = ("SERIAL", "PORT", "DESCRIPTION")
+    widths = [max(len(row[column]) for row in [headers, *rows]) for column in range(3)]
+
+    for row in [headers, *rows]:
+        cells = zip(row, widths, strict=True)
+        print("  ".join(cell.ljust(width) for cell, width in cells).rstrip())
     return 0
 
 
@@ -265,9 +284,9 @@ def command_watch(args: argparse.Namespace) -> int:
 
 
 def _connect(args: argparse.Namespace):
-    port = resolve_port(args.port)
-    board_type = resolve_board_type(port, args.board)
-    return open_board(port, board_type, delay=args.delay)
+    device = resolve_device(args.port, args.serial)
+    board_type = resolve_board_type(device.port, args.board)
+    return open_board(device, board_type, delay=args.delay)
 
 
 def _report(board: Board, states: Mapping[int, bool], args: argparse.Namespace) -> None:
@@ -276,7 +295,8 @@ def _report(board: Board, states: Mapping[int, bool], args: argparse.Namespace) 
         return
 
     mask = states_to_mask(states)
-    print(f"{board.board_type} on {board.port}, {board.num_relays} relays")
+    where = f"{board.serial_number} on {board.port}" if board.serial_number else board.port
+    print(f"{board.board_type} {where}, {board.num_relays} relays")
     print(format_states(states, color=_color(args)))
     print(f"{summarise(states)}  [{format_mask(mask, board.num_relays)}]")
 
@@ -308,6 +328,7 @@ def _as_dict(board: Board, states: Mapping[int, bool]) -> dict:
     mask = states_to_mask(states)
     return {
         "port": board.port,
+        "serial": board.serial_number,
         "board": board.board_type,
         "num_relays": board.num_relays,
         "mask": mask,
