@@ -1,0 +1,31 @@
+root = true
+
+[*]
+charset = utf-8
+end_of_line = lf
+insert_final_newline = true
+trim_trailing_whitespace = true
+indent_style = space
+indent_size = 4
+max_line_length = 100
+
+[*.{cpp,h}]
+indent_size = 4
+
+[{CMakeLists.txt,*.cmake}]
+indent_size = 2
+
+[*.{yml,yaml,json}]
+indent_size = 2
+
+[*.md]
+# Two trailing spaces are a line break in Markdown.
+trim_trailing_whitespace = false
+
+[*.rules]
+indent_size = 2
+
+[LICENSE]
+insert_final_newline = false
+trim_trailing_whitespace = false
+max_line_length = off

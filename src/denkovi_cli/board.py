@@ -1,0 +1,266 @@
+# denkovi-cli - command line control of Denkovi USB relay boards.
+# Copyright (C) 2026 Bernhard Trinnes
+#
+# This program is free software; you can redistribute it and/or modify it under
+# the terms of the GNU General Public License version 2, as published by the
+# Free Software Foundation. This program is distributed in the hope that it will
+# be useful, but WITHOUT ANY WARRANTY. See the LICENSE file for the full text.
+
+"""Discovery of, and access to, Denkovi USB relay boards.
+
+Thin wrapper around the vendored ``dae_RelayBoard`` library (see the
+``dae-py-relay-controller`` submodule) that adds device discovery, board type
+probing and errors that are fit to show to a user.
+"""
+
+from __future__ import annotations
+
+import contextlib
+import sys
+import time
+from collections.abc import Iterator, Mapping
+from dataclasses import dataclass
+
+import dae_RelayBoard
+import serial
+from dae_RelayBoard import dae_RelayBoard_Common
+from serial.tools import list_ports
+
+#: FTDI's USB vendor id. Every Denkovi USB board is built around an FT232R.
+FTDI_VENDOR_ID = 0x0403
+
+#: Denkovi programs its boards with a serial number starting with this.
+DENKOVI_SERIAL_PREFIX = dae_RelayBoard_Common.DENKOVI_ID
+
+#: Board type -> relay count, in the naming the library uses.
+BOARD_TYPES = {
+    dae_RelayBoard.DAE_RELAYBOARD_TYPE_4: 4,
+    dae_RelayBoard.DAE_RELAYBOARD_TYPE_8: 8,
+    dae_RelayBoard.DAE_RELAYBOARD_TYPE_16: 16,
+}
+
+#: Boards driven over a virtual COM port with the ASCII "//" protocol.
+VCP_BOARD_TYPES = (dae_RelayBoard.DAE_RELAYBOARD_TYPE_16,)
+
+#: Boards driven by bit-banging the FT232R through the D2XX driver.
+D2XX_BOARD_TYPES = (
+    dae_RelayBoard.DAE_RELAYBOARD_TYPE_4,
+    dae_RelayBoard.DAE_RELAYBOARD_TYPE_8,
+)
+
+#: Default inter-command delay of the VCP protocol, in seconds.
+DEFAULT_DELAY = 0.05
+
+
+class DenkoviError(Exception):
+    """An error worth reporting to the user without a traceback."""
+
+
+@dataclass(frozen=True)
+class Device:
+    """A serial port that looks like it could be a relay board."""
+
+    port: str
+    serial_number: str | None
+    description: str
+    manufacturer: str | None
+    vendor_id: int | None
+    product_id: int | None
+
+    @property
+    def is_denkovi(self) -> bool:
+        serial_number = self.serial_number or ""
+        manufacturer = self.manufacturer or ""
+        return serial_number.upper().startswith(DENKOVI_SERIAL_PREFIX) or (
+            "denkovi" in manufacturer.lower()
+        )
+
+    @property
+    def is_ftdi(self) -> bool:
+        return self.vendor_id == FTDI_VENDOR_ID
+
+
+def discover_devices(*, all_ports: bool = False) -> list[Device]:
+    """Return the Denkovi boards on this machine, ordered by port name.
+
+    With ``all_ports`` every serial port is returned instead, which is the
+    escape hatch for a board whose FTDI chip was reprogrammed with a serial
+    number that does not identify it as a Denkovi.
+    """
+    devices = [
+        Device(
+            port=port.device,
+            serial_number=port.serial_number,
+            description=port.description,
+            manufacturer=port.manufacturer,
+            vendor_id=port.vid,
+            product_id=port.pid,
+        )
+        for port in list_ports.comports()
+    ]
+    if not all_ports:
+        devices = [device for device in devices if device.is_denkovi]
+    return sorted(devices, key=lambda device: device.port)
+
+
+def resolve_port(port: str | None) -> str:
+    """Return the port to talk to, auto-detecting when one was not given."""
+    if port is not None:
+        return port
+
+    devices = discover_devices()
+    if not devices:
+        raise DenkoviError(
+            "no Denkovi board found. Check that it is plugged in, or pass "
+            "--port explicitly ('denkovi list --all' shows every serial port)."
+        )
+    if len(devices) > 1:
+        ports = ", ".join(device.port for device in devices)
+        raise DenkoviError(f"several Denkovi boards found ({ports}). Pass --port to pick one.")
+    return devices[0].port
+
+
+def probe_board_type(port: str, *, timeout: float = 1.0) -> str | None:
+    """Return the board type on ``port``, or ``None`` if it cannot be told.
+
+    Only the VCP boards can be identified over the wire: they answer the
+    ``ask`` command with one status byte per eight relays. The bit-banged 4 and
+    8 relay boards are silent and indistinguishable from each other, so they
+    have to be named explicitly.
+    """
+    try:
+        with serial.Serial(port=port, baudrate=9600, timeout=timeout) as connection:
+            time.sleep(DEFAULT_DELAY)
+            connection.reset_input_buffer()
+            connection.reset_output_buffer()
+            connection.write(b"ask//")
+            time.sleep(DEFAULT_DELAY)
+            reply = connection.read(2)
+    except (OSError, serial.SerialException) as error:
+        raise DenkoviError(f"could not open {port}: {error}") from error
+
+    if len(reply) == 2:
+        return dae_RelayBoard.DAE_RELAYBOARD_TYPE_16
+    return None
+
+
+def resolve_board_type(port: str, board_type: str | None) -> str:
+    """Return the board type to drive ``port`` with, probing when not given."""
+    if board_type is not None:
+        if board_type not in BOARD_TYPES:
+            supported = ", ".join(BOARD_TYPES)
+            raise DenkoviError(f"unknown board type {board_type!r}. Supported: {supported}.")
+        return board_type
+
+    detected = probe_board_type(port)
+    if detected is None:
+        raise DenkoviError(
+            f"could not identify the board on {port}. The 4 and 8 relay boards cannot "
+            "be detected over the wire; pass --board type4 or --board type8."
+        )
+    return detected
+
+
+class Board:
+    """A connected relay board.
+
+    Relays are numbered from 1, as they are labelled on the board and in the
+    underlying library.
+    """
+
+    def __init__(self, handle: dae_RelayBoard.DAE_RelayBoard, port: str, board_type: str) -> None:
+        self._handle = handle
+        self.port = port
+        self.board_type = board_type
+
+    @property
+    def num_relays(self) -> int:
+        return self._handle.getNumRelays()
+
+    def validate(self, relays: list[int]) -> None:
+        """Raise if any relay number is outside what this board has."""
+        out_of_range = sorted({relay for relay in relays if not 1 <= relay <= self.num_relays})
+        if out_of_range:
+            numbers = ", ".join(str(relay) for relay in out_of_range)
+            raise DenkoviError(
+                f"relay {numbers} out of range: this {self.board_type} board has "
+                f"{self.num_relays} relays (1-{self.num_relays})."
+            )
+
+    def get_states(self) -> dict[int, bool]:
+        return dict(self._handle.getStates())
+
+    def set_states(self, states: Mapping[int, bool]) -> None:
+        """Set the given relays, leaving every other relay untouched."""
+        self.validate(list(states))
+        if not states:
+            return
+        # The library writes one relay per command, so a full-board write is
+        # worth collapsing into the board's own all-on/all-off command.
+        wanted = set(states.values())
+        if len(states) == self.num_relays and len(wanted) == 1:
+            self.set_all(wanted.pop())
+            return
+        self._handle.setStates(dict(states))
+
+    def set_all(self, on: bool) -> None:
+        if on:
+            self._handle.setAllStatesOn()
+        else:
+            self._handle.setAllStatesOff()
+
+    def mask(self) -> int:
+        """Return the board state as an integer, relay N in bit N-1."""
+        return states_to_mask(self.get_states())
+
+
+def states_to_mask(states: Mapping[int, bool]) -> int:
+    mask = 0
+    for relay, on in states.items():
+        if on:
+            mask |= 1 << (relay - 1)
+    return mask
+
+
+def mask_to_states(mask: int, num_relays: int) -> dict[int, bool]:
+    return {relay: bool(mask >> (relay - 1) & 1) for relay in range(1, num_relays + 1)}
+
+
+@contextlib.contextmanager
+def open_board(
+    port: str,
+    board_type: str,
+    *,
+    delay: float = DEFAULT_DELAY,
+) -> Iterator[Board]:
+    """Connect to a board, and disconnect again however the block exits."""
+    if board_type in D2XX_BOARD_TYPES and not _has_d2xx_support():
+        raise DenkoviError(
+            f"the {board_type} board is driven through the FTDI D2XX driver, which the "
+            f"relay library only supports on Windows and Linux (this is {sys.platform}). "
+            "Only type16 boards can be used here."
+        )
+
+    try:
+        # Only the VCP boards take a command delay; the D2XX ones take no args.
+        args = (delay,) if board_type in VCP_BOARD_TYPES else ()
+        handle = dae_RelayBoard.DAE_RelayBoard(board_type, *args)
+        handle.initialise(port)
+    except dae_RelayBoard_Common.Denkovi_Exception as error:
+        raise DenkoviError(f"could not connect to the board on {port}: {error}") from error
+
+    board = Board(handle, port, board_type)
+    try:
+        yield board
+    except dae_RelayBoard_Common.Denkovi_Exception as error:
+        raise DenkoviError(
+            f"communication with the board on {port} failed: {error}. Only one program "
+            "can drive the board at a time; a longer --delay can also help."
+        ) from error
+    finally:
+        with contextlib.suppress(Exception):
+            handle.disconnect()
+
+
+def _has_d2xx_support() -> bool:
+    return sys.platform == "win32" or "linux" in sys.platform

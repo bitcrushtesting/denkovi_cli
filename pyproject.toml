@@ -1,0 +1,51 @@
+[project]
+name = "denkovi-cli"
+version = "0.1.0"
+description = "Command line control of Denkovi USB relay boards"
+readme = "README.md"
+authors = [
+    { name = "Bernhard Trinnes", email = "bernhard.trinnes@bitcushtesting.com" }
+]
+requires-python = ">=3.12"
+license = "GPL-2.0-only"
+license-files = ["LICENSE"]
+classifiers = [
+    "Environment :: Console",
+    "Intended Audience :: Developers",
+    "Operating System :: MacOS",
+    "Operating System :: Microsoft :: Windows",
+    "Operating System :: POSIX :: Linux",
+    "Topic :: System :: Hardware :: Hardware Drivers",
+]
+dependencies = [
+    "pyserial>=3.5",
+    "dae-RelayBoard",
+]
+
+[project.scripts]
+denkovi = "denkovi_cli.cli:main"
+
+[build-system]
+requires = ["uv_build>=0.12.5,<0.13.0"]
+build-backend = "uv_build"
+
+# The Denkovi board library is vendored as a git submodule. It is a legacy
+# setup.py-only project, so it is pulled in by path rather than from PyPI.
+[tool.uv.sources]
+dae-RelayBoard = { path = "dae-py-relay-controller" }
+
+[dependency-groups]
+dev = [
+    "pytest>=9.1.1",
+    "ruff>=0.14",
+]
+
+# Line length matches max_line_length in .editorconfig.
+[tool.ruff]
+line-length = 100
+
+[tool.ruff.lint]
+extend-select = ["I", "UP", "B"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
