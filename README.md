@@ -1,6 +1,7 @@
 # denkovi-cli
 
-[![CI](../../actions/workflows/ci.yml/badge.svg)](../../actions/workflows/ci.yml)
+[![CI](https://github.com/bitcrushtesting/denkovi_cli/actions/workflows/ci.yml/badge.svg)](https://github.com/bitcrushtesting/denkovi_cli/actions/workflows/ci.yml)
+[![PyPI](https://img.shields.io/pypi/v/denkovi-cli.svg)](https://pypi.org/project/denkovi-cli/)
 
 Command line control of [Denkovi](https://denkovi.com) USB relay boards.
 
@@ -16,47 +17,33 @@ on: 1, 3  [0x0005]
 
 ## Install
 
-Python 3.12 or newer. The relay library is a git submodule, so clone with it:
+Python 3.12 or newer.
 
 ```sh
-git clone --recurse-submodules <this repo>
+uv tool install denkovi-cli     # or: pipx install denkovi-cli
+```
+
+That puts `denkovi` on your PATH. To add it to a project instead:
+
+```sh
+uv add denkovi-cli              # or: pip install denkovi-cli
+```
+
+### From a source checkout
+
+```sh
+git clone https://github.com/bitcrushtesting/denkovi_cli
 cd denkovi_cli
+uv sync                         # or: pip install .
 ```
-
-If the repository was cloned without `--recurse-submodules`, run
-`git submodule update --init` first, otherwise there is nothing to build.
-
-### With uv
-
-```sh
-uv sync
-```
-
-### With pip
-
-uv is not required; this is a standard PEP 621 package.
-
-```sh
-python3 -m venv .venv
-source .venv/bin/activate               # Windows: .venv\Scripts\activate
-pip install ./dae-py-relay-controller   # the submodule, first
-pip install .
-```
-
-Install the submodule first, as above, if you want the copy this repository pins.
-pip does not read `[tool.uv.sources]`, which is what points the `dae-RelayBoard`
-dependency at the submodule, so a bare `pip install .` downloads `dae_RelayBoard`
-from PyPI instead. Both work and both give version 1.5.2 — the PyPI release differs
-only in code formatting — but only the two-step form is guaranteed to track the
-submodule.
 
 ### Without installing anything
 
-To run from a source checkout with only pyserial present:
+To run from a source checkout with only the two runtime dependencies present:
 
 ```sh
-pip install pyserial
-PYTHONPATH=src:dae-py-relay-controller python -m denkovi_cli.cli status
+pip install pyserial dae-RelayBoard
+PYTHONPATH=src python -m denkovi_cli.cli status
 ```
 
 `--version` reports `0.0.0+unknown` this way, since there is no installed package to
@@ -64,9 +51,9 @@ read it from.
 
 ### Running the command
 
-The examples below are written as `uv run denkovi ...`. Drop the `uv run` prefix when
-the virtualenv is activated, or after `uv tool install .` / `pipx install .`, which
-put `denkovi` on your PATH.
+The examples below are written as `uv run denkovi ...`, which is what a source
+checkout needs. Drop the `uv run` prefix after `uv tool install` or `pipx install`,
+or whenever the virtualenv is activated.
 
 ## Usage
 
@@ -203,16 +190,16 @@ against Python 3.12 to 3.14.
 ## Credits
 
 The board communication is done by **[dae-py-relay-controller][lib]** by
-[Peter Bingham][author], vendored here as a git submodule. It implements both the
-ASCII serial protocol of the 16 relay boards and the D2XX bit-banging of the 4 and 8
-relay boards; this project only adds discovery, argument parsing and output on top.
-The library is distributed under the MIT licence — see
-[`dae-py-relay-controller/README.md`](dae-py-relay-controller/README.md).
+[Peter Bingham][author], taken from PyPI as [`dae_RelayBoard`][pypi]. It implements
+both the ASCII serial protocol of the 16 relay boards and the D2XX bit-banging of the
+4 and 8 relay boards; this project only adds discovery, argument parsing and output
+on top. The library is distributed under the MIT licence.
 
 Relay boards and their documentation are made by [Denkovi Assembly Electronics][denkovi],
 who are not affiliated with this project.
 
 [lib]: https://github.com/petersbingham/dae-py-relay-controller
+[pypi]: https://pypi.org/project/dae-RelayBoard/
 [author]: https://github.com/petersbingham
 [denkovi]: https://denkovi.com
 
@@ -226,5 +213,5 @@ Foundation. It is distributed in the hope that it will be useful, but WITHOUT AN
 WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS FOR A
 PARTICULAR PURPOSE. See [LICENSE](LICENSE) for the full text.
 
-The MIT licence of the vendored library is compatible with the GPL, so the combined
-work may be distributed under the GPL. The submodule keeps its own MIT licence.
+The MIT licence of `dae_RelayBoard` is compatible with the GPL, so the combined work
+may be distributed under the GPL. That library keeps its own MIT licence.

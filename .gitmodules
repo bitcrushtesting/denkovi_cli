@@ -1,3 +1,0 @@
-[submodule "dae-py-relay-controller"]
-	path = dae-py-relay-controller
-	url = https://github.com/petersbingham/dae-py-relay-controller.git
