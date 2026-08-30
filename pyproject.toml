@@ -4,23 +4,33 @@ version = "0.1.0"
 description = "Command line control of Denkovi USB relay boards"
 readme = "README.md"
 authors = [
-    { name = "Bernhard Trinnes", email = "bernhard.trinnes@bitcushtesting.com" }
+    { name = "Bernhard Trinnes", email = "bernhard.trinnes@bitcrushtesting.com" }
 ]
 requires-python = ">=3.12"
 license = "GPL-2.0-only"
 license-files = ["LICENSE"]
+keywords = ["denkovi", "relay", "usb", "ftdi", "automation", "cli"]
 classifiers = [
+    "Development Status :: 4 - Beta",
     "Environment :: Console",
     "Intended Audience :: Developers",
     "Operating System :: MacOS",
     "Operating System :: Microsoft :: Windows",
     "Operating System :: POSIX :: Linux",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Programming Language :: Python :: 3.14",
     "Topic :: System :: Hardware :: Hardware Drivers",
 ]
 dependencies = [
     "pyserial>=3.5",
-    "dae-RelayBoard",
+    "dae-RelayBoard>=1.5.2",
 ]
+
+[project.urls]
+Homepage = "https://github.com/bitcrushtesting/denkovi_cli"
+Repository = "https://github.com/bitcrushtesting/denkovi_cli"
+Issues = "https://github.com/bitcrushtesting/denkovi_cli/issues"
 
 [project.scripts]
 denkovi = "denkovi_cli.cli:main"
@@ -28,11 +38,6 @@ denkovi = "denkovi_cli.cli:main"
 [build-system]
 requires = ["uv_build>=0.12.5,<0.13.0"]
 build-backend = "uv_build"
-
-# The Denkovi board library is vendored as a git submodule. It is a legacy
-# setup.py-only project, so it is pulled in by path rather than from PyPI.
-[tool.uv.sources]
-dae-RelayBoard = { path = "dae-py-relay-controller" }
 
 [dependency-groups]
 dev = [

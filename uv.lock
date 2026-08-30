@@ -14,7 +14,11 @@ wheels = [
 [[package]]
 name = "dae-relayboard"
 version = "1.5.2"
-source = { directory = "dae-py-relay-controller" }
+source = { registry = "https://pypi.org/simple" }
+sdist = { url = "https://files.pythonhosted.org/packages/42/49/d0451e3fb5f8509705b63f82363c7c44fd7c179a3099ca67b4178f66e846/dae_relayboard-1.5.2.tar.gz", hash = "sha256:d0722c26253e78c64b367881ba6329042cccf2faaa5ce22ad092d23008c7e635", size = 9839, upload-time = "2024-08-02T01:49:21.327Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/2b/d6/2f48df66385a042053a2d620dbe9f73d4a6e75d8e8f56a2291b8a66878e9/dae_RelayBoard-1.5.2-py3-none-any.whl", hash = "sha256:c80a640d138a4c1792a7bd8a1cc6978c90f792caf8fdd182219daa0c9f56e0a3", size = 13967, upload-time = "2024-08-02T01:49:19.498Z" },
+]
 
 [[package]]
 name = "denkovi-cli"
@@ -33,7 +37,7 @@ dev = [
 
 [package.metadata]
 requires-dist = [
-    { name = "dae-relayboard", directory = "dae-py-relay-controller" },
+    { name = "dae-relayboard", specifier = ">=1.5.2" },
     { name = "pyserial", specifier = ">=3.5" },
 ]
 

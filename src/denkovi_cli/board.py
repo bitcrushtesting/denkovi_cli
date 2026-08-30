@@ -8,9 +8,8 @@
 
 """Discovery of, and access to, Denkovi USB relay boards.
 
-Thin wrapper around the vendored ``dae_RelayBoard`` library (see the
-``dae-py-relay-controller`` submodule) that adds device discovery, board type
-probing and errors that are fit to show to a user.
+Thin wrapper around the ``dae_RelayBoard`` library that adds device discovery,
+board type probing and errors that are fit to show to a user.
 """
 
 from __future__ import annotations
