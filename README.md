@@ -154,9 +154,17 @@ on: 1, 3  [0x05]
 
 Probing never writes to a bit-banged board. Its FTDI chip is a FIFO rather than a
 UART, so every byte written to it lands straight on the relays — asking it for its
-state would leave them holding a `/`. It gives itself away by handing over bytes with
-nothing asked of it, which a board that answers a protocol never does, so the port is
-listened to before it is spoken to, and relays are left where they were.
+state would leave them holding a `/`, and the board would then answer with enough
+bytes to pass for a 16 relay board that is not there.
+
+So a bit-banged board is ruled out first, without writing anything. Reading the chip's
+data lines changes nothing — no byte is sent and no pin is switched to an output — but
+it wakes the read side of the FIFO, and the board then hands the port bytes with
+nothing asked of it, which a board that answers a protocol does not do. Relays are
+left exactly where they were.
+
+This needs `libftdi`. Without it nothing can be told about the data lines and the
+board is left to the protocol probe, which is where `--board` comes in.
 
 ## Board support
 

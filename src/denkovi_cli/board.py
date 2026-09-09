@@ -183,53 +183,73 @@ def _describe(devices: list[Device]) -> str:
     )
 
 
-def probe_board_type(port: str, *, timeout: float = 1.0) -> str | None:
-    """Return the board type on ``port``, or ``None`` if it cannot be told.
+def probe_board_type(device: Device, *, timeout: float = 1.0) -> str | None:
+    """Return the type of ``device``, or ``None`` if it cannot be told.
 
     Only the VCP boards can be identified over the wire: they answer the
     ``ask`` command with one status byte per eight relays. The bit-banged 4 and
     8 relay boards cannot be told apart from each other, so they have to be
     named explicitly.
 
-    Nothing is written to a board that must not be written to. A bit-banged
-    board is a FIFO wearing a serial port's clothes: every byte written to it
-    lands on the relays, and 'ask//' would leave them holding a '/'. It gives
-    itself away by handing over bytes with nothing asked of it, which a board
-    that answers a protocol never does, so the port is listened to first and
-    only a port that stays quiet is spoken to.
+    A bit-banged board is ruled out before a single byte is written, because
+    writing to one is what must not happen: it is a FIFO wearing a serial
+    port's clothes, so 'ask//' would land on the relays and leave them holding
+    a '/'. Reading its data lines, which changes nothing, wakes the read side
+    of its FIFO, and it then hands the port bytes with nothing asked of it —
+    which a board that answers a protocol does not do.
     """
+    if _looks_bit_banged(device):
+        return None
+
     try:
-        with serial.Serial(port=port, baudrate=9600, timeout=LISTEN_TIMEOUT) as connection:
+        with serial.Serial(port=device.port, baudrate=9600, timeout=timeout) as connection:
             time.sleep(DEFAULT_DELAY)
             connection.reset_input_buffer()
             connection.reset_output_buffer()
-            if connection.read(1):
-                return None
-            connection.timeout = timeout
             connection.write(b"ask//")
             time.sleep(DEFAULT_DELAY)
             reply = connection.read(2)
     except (OSError, serial.SerialException) as error:
-        raise DenkoviError(f"could not open {port}: {error}") from error
+        raise DenkoviError(f"could not open {device.port}: {error}") from error
 
     if len(reply) == 2:
         return dae_RelayBoard.DAE_RELAYBOARD_TYPE_16
     return None
 
 
-def resolve_board_type(port: str, board_type: str | None) -> str:
-    """Return the board type to drive ``port`` with, probing when not given."""
+def _looks_bit_banged(device: Device) -> bool:
+    """Whether the board is one whose relays hang off its FTDI data lines.
+
+    Answers ``False`` when it cannot tell — because libftdi is not installed,
+    or the chip cannot be opened — which leaves the board to the VCP probe,
+    where the worst case is a board that has to be named with ``--board``.
+    """
+    try:
+        from .bitbang import is_supported, read_data_lines
+
+        if not is_supported():
+            return False
+        read_data_lines(device.serial_number)
+        with serial.Serial(port=device.port, baudrate=9600, timeout=LISTEN_TIMEOUT) as connection:
+            connection.reset_input_buffer()
+            return bool(connection.read(1))
+    except (DenkoviError, OSError, serial.SerialException):
+        return False
+
+
+def resolve_board_type(device: Device, board_type: str | None) -> str:
+    """Return the board type to drive ``device`` with, probing when not given."""
     if board_type is not None:
         if board_type not in BOARD_TYPES:
             supported = ", ".join(BOARD_TYPES)
             raise DenkoviError(f"unknown board type {board_type!r}. Supported: {supported}.")
         return board_type
 
-    detected = probe_board_type(port)
+    detected = probe_board_type(device)
     if detected is None:
         raise DenkoviError(
-            f"could not identify the board on {port}. The 4 and 8 relay boards cannot "
-            "be detected over the wire; pass --board type4 or --board type8."
+            f"could not identify the board on {device.port}. The 4 and 8 relay boards "
+            "cannot be detected over the wire; pass --board type4 or --board type8."
         )
     return detected
 
