@@ -39,10 +39,11 @@ uv sync                         # or: pip install .
 
 ### Without installing anything
 
-To run from a source checkout with only the two runtime dependencies present:
+To run from a source checkout with only the runtime dependencies present:
 
 ```sh
 pip install pyserial dae-RelayBoard
+pip install pylibftdi          # macOS and Linux, for the 4 and 8 relay boards
 PYTHONPATH=src python -m denkovi_cli.cli status
 ```
 
@@ -140,26 +141,56 @@ with `DAE`. If a board's chip was reflashed with a serial number that does not,
 find it with `denkovi list --all` and address it by `--port`.
 
 Board type is probed by asking the board for its state: only the 16 relay board
-answers. The 4 and 8 relay boards are silent and indistinguishable from each other,
-so they have to be named with `--board`.
+answers. The 4 and 8 relay boards cannot be told apart from each other, so they have
+to be named with `--board`:
+
+```console
+$ denkovi --board type8 on 1,3
+type8 DAE00745 on /dev/cu.usbserial-DAE00745, 8 relays
+1 ●  ON   2 ○  off  3 ●  ON   4 ○  off
+5 ○  off  6 ○  off  7 ○  off  8 ○  off
+on: 1, 3  [0x05]
+```
+
+Probing never writes to a bit-banged board. Its FTDI chip is a FIFO rather than a
+UART, so every byte written to it lands straight on the relays — asking it for its
+state would leave them holding a `/`. It gives itself away by handing over bytes with
+nothing asked of it, which a board that answers a protocol never does, so the port is
+listened to before it is spoken to, and relays are left where they were.
 
 ## Board support
 
 | Board | Driver | Works on |
 | --- | --- | --- |
 | `type16` | virtual COM port, ASCII protocol | macOS, Linux, Windows |
-| `type8`, `type4` | FTDI D2XX bit-banging | Linux, Windows |
+| `type8`, `type4` | FTDI chip bit-banged | macOS, Linux, Windows |
 
-The 4 and 8 relay boards are driven by bit-banging the FT232R through the D2XX
-driver, which the underlying library only implements for Windows and Linux; on
-Linux they additionally need `pylibftdi`. Asking for one on macOS fails with an
-explanation rather than a traceback.
+The 4 and 8 relay boards speak no protocol at all: their relays hang off the data
+lines of the board's FTDI chip — an FT245 on the 8 relay board, an FT232 on the 4 —
+which is driven in bit-bang mode. Because nothing answers back, these boards cannot
+be probed and have to be named with `--board type8` or `--board type4`.
+
+Windows reaches the chip through FTDI's D2XX driver and needs nothing extra:
+`FTD2XX.dll` arrives with the board's own driver. macOS and Linux go through
+`libftdi`, which is a C library and so does not come from pip:
+
+```sh
+brew install libftdi            # macOS
+sudo apt install libftdi1-2     # Debian, Ubuntu
+```
+
+Its Python binding, `pylibftdi`, is installed with denkovi-cli. Nothing has to be
+unloaded or disabled on macOS: the board can be bit-banged while the system's FTDI
+serial driver still offers it as `/dev/cu.usbserial-*`.
 
 ## Notes
 
 - Only one program can drive a board at a time. Two processes on the same serial
   port interleave their commands and corrupt each other's replies, which shows up
-  as a communication error.
+  as a communication error. A bit-banged board is claimed outright, and the second
+  command reports that it could not open the board.
+- Bit-banged boards keep their relays where they were left: the state lives in the
+  FTDI chip's output latch, and closing the board does not disturb it.
 - The type16 protocol needs a delay between commands. The library's default of
   50ms is used; the documented 5ms was found to corrupt replies. `--delay` can
   raise it if a board proves flaky. Commands that drive the whole board the same
@@ -191,9 +222,10 @@ against Python 3.12 to 3.14.
 
 The board communication is done by **[dae-py-relay-controller][lib]** by
 [Peter Bingham][author], taken from PyPI as [`dae_RelayBoard`][pypi]. It implements
-both the ASCII serial protocol of the 16 relay boards and the D2XX bit-banging of the
-4 and 8 relay boards; this project only adds discovery, argument parsing and output
-on top. The library is distributed under the MIT licence.
+both the ASCII serial protocol of the 16 relay boards and the bit-banging of the 4
+and 8 relay boards; this project adds discovery, argument parsing and output on top,
+plus the `pylibftdi` backend that carries the bit-banged boards on macOS. The library
+is distributed under the MIT licence.
 
 Relay boards and their documentation are made by [Denkovi Assembly Electronics][denkovi],
 who are not affiliated with this project.

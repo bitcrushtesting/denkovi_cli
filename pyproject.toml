@@ -25,6 +25,9 @@ classifiers = [
 dependencies = [
     "pyserial>=3.5",
     "dae-RelayBoard>=1.5.2",
+    # Bit-bangs the 4 and 8 relay boards. Windows drives them through the D2XX
+    # DLL instead, so it needs no Python package for them.
+    "pylibftdi>=0.24; sys_platform == 'darwin' or sys_platform == 'linux'",
 ]
 
 [project.urls]
