@@ -275,33 +275,61 @@ class TestProbe:
     """Probing must never write to a board whose relays are the data lines."""
 
     @pytest.fixture
-    def port(self, monkeypatch: pytest.MonkeyPatch) -> type[FakePort]:
+    def port(self, monkeypatch: pytest.MonkeyPatch):
         def install(fake: FakePort) -> FakePort:
             monkeypatch.setattr(board_module.serial, "Serial", fake)
             return fake
 
-        return install  # type: ignore[return-value]
+        return install
 
-    def test_a_talkative_port_is_left_alone(self, port) -> None:
-        # An FT245 hands over bytes with nothing asked of it, and anything
-        # written to it would land on the relays.
-        fake = port(FakePort(stream=b"\x00" * 8))
+    @pytest.fixture
+    def data_lines(self, monkeypatch: pytest.MonkeyPatch):
+        """Make reading the FTDI data lines succeed, fail, or be unavailable."""
 
-        assert board_module.probe_board_type("/dev/fake") is None
+        def install(result: object) -> None:
+            def read(serial_number: str | None) -> int:
+                if isinstance(result, Exception):
+                    raise result
+                return int(result)  # type: ignore[arg-type]
+
+            monkeypatch.setattr(bitbang, "read_data_lines", read)
+            monkeypatch.setattr(bitbang, "is_supported", lambda: True)
+
+        return install
+
+    def test_a_board_whose_fifo_answers_is_never_written_to(self, port, data_lines) -> None:
+        # Reading the data lines wakes an FT245's FIFO, and it then hands over
+        # bytes unprompted. Anything written would have landed on the relays.
+        data_lines(0x5A)
+        fake = port(FakePort(stream=b"\x5a" * 4))
+
+        assert board_module.probe_board_type(_device()) is None
         assert fake.written == b""
 
-    def test_a_board_that_answers_is_a_type16(self, port) -> None:
+    def test_a_board_that_answers_the_protocol_is_a_type16(self, port, data_lines) -> None:
+        data_lines(0x00)
         fake = port(FakePort(reply=b"\x00\x00"))
 
-        assert board_module.probe_board_type("/dev/fake") == TYPE16
+        assert board_module.probe_board_type(_device()) == TYPE16
         assert fake.written == b"ask//"
 
-    def test_a_board_that_says_nothing_at_all_is_unknown(self, port) -> None:
+    def test_a_board_that_says_nothing_at_all_is_unknown(self, port, data_lines) -> None:
+        data_lines(0x00)
         port(FakePort())
-        assert board_module.probe_board_type("/dev/fake") is None
+        assert board_module.probe_board_type(_device()) is None
 
-    def test_an_unidentified_board_asks_to_be_named(self, port) -> None:
-        port(FakePort(stream=b"\x00" * 8))
+    def test_without_libftdi_the_protocol_probe_still_runs(self, port, data_lines) -> None:
+        # Nothing can be told about the data lines, so the board is left to the
+        # VCP probe, exactly as it was before there was a way to read them.
+        data_lines(DenkoviError("no libftdi here"))
+        fake = port(FakePort(reply=b"\x00\x00"))
+
+        assert board_module.probe_board_type(_device()) == TYPE16
+        assert fake.written == b"ask//"
+
+    def test_an_unidentified_board_asks_to_be_named(self, port, data_lines) -> None:
+        data_lines(0x5A)
+        port(FakePort(stream=b"\x5a" * 4))
 
         with pytest.raises(DenkoviError, match="--board type8"):
-            board_module.resolve_board_type("/dev/fake", None)
+            board_module.resolve_board_type(_device(), None)

@@ -122,10 +122,45 @@ class BitBangBackend:
         return self._device
 
 
-def _pylibftdi() -> tuple[Any, Any, type[BaseException]]:
-    """Return the pylibftdi names used here, or say how to install it."""
+def read_data_lines(serial_number: str | None) -> int:
+    """Return the state of the eight data lines of a board's FTDI chip.
+
+    The chip is opened in its ordinary serial mode and only read from: no byte
+    is written and no pin is switched to an output, so this is safe to do to a
+    board of any kind. On a bit-banged board the data lines are the relays.
+
+    Reading them also wakes the read side of an FT245's FIFO, which is what
+    lets a bit-banged board be recognised without writing to it; see
+    `board.probe_board_type`.
+    """
+    from ctypes import byref, c_ubyte
+
+    device_class, driver, ftdi_error = _pylibftdi(bit_bang=False)
     try:
-        from pylibftdi import BitBangDevice, Driver, FtdiError
+        device = device_class(
+            serial_number or None,
+            driver=_driver(driver),
+            auto_detach=sys.platform != "darwin",
+        )
+        try:
+            pins = c_ubyte()
+            if device.ftdi_fn.ftdi_read_pins(byref(pins)) != 0:
+                raise DenkoviError(f"could not read the data lines of {serial_number}.")
+            return int(pins.value)
+        finally:
+            device.close()
+    except (ftdi_error, OSError, AttributeError) as error:
+        raise DenkoviError(_open_failed(error, serial_number)) from error
+
+
+def _pylibftdi(*, bit_bang: bool = True) -> tuple[Any, Any, type[BaseException]]:
+    """Return the pylibftdi names used here, or say how to install it.
+
+    ``bit_bang`` picks the device class: the bit-bang one drives the data lines
+    as outputs, the plain one leaves the chip in the serial mode it was in.
+    """
+    try:
+        from pylibftdi import BitBangDevice, Device, Driver, FtdiError
     except ImportError as error:
         raise DenkoviError(
             "the 4 and 8 relay boards are driven through pylibftdi, which is not "
@@ -133,7 +168,7 @@ def _pylibftdi() -> tuple[Any, Any, type[BaseException]]:
             "libftdi C library: 'brew install libftdi' on macOS, or the distribution's "
             "libftdi1 package on Linux)."
         ) from error
-    return BitBangDevice, Driver, FtdiError
+    return (BitBangDevice if bit_bang else Device), Driver, FtdiError
 
 
 def _driver(driver_class: Any) -> Any:

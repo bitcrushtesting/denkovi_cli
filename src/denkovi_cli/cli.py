@@ -285,7 +285,7 @@ def command_watch(args: argparse.Namespace) -> int:
 
 def _connect(args: argparse.Namespace):
     device = resolve_device(args.port, args.serial)
-    board_type = resolve_board_type(device.port, args.board)
+    board_type = resolve_board_type(device, args.board)
     return open_board(device, board_type, delay=args.delay)
 
 
