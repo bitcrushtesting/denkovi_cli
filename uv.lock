@@ -26,6 +26,7 @@ version = "0.1.0"
 source = { editable = "." }
 dependencies = [
     { name = "dae-relayboard" },
+    { name = "pylibftdi", marker = "sys_platform == 'darwin' or sys_platform == 'linux'" },
     { name = "pyserial" },
 ]
 
@@ -38,6 +39,7 @@ dev = [
 [package.metadata]
 requires-dist = [
     { name = "dae-relayboard", specifier = ">=1.5.2" },
+    { name = "pylibftdi", marker = "sys_platform == 'darwin' or sys_platform == 'linux'", specifier = ">=0.24" },
     { name = "pyserial", specifier = ">=3.5" },
 ]
 
@@ -81,6 +83,15 @@ source = { registry = "https://pypi.org/simple" }
 sdist = { url = "https://files.pythonhosted.org/packages/49/2e/ced460408999b33da6b31b0021b0f37d329e202d4169aeb164493778f25b/pygments-2.21.0.tar.gz", hash = "sha256:610ca751c9bc2492b38eb9a38a7fbc93edbbb2d7182edaf34e66ae493dee5c8c", size = 5005329, upload-time = "2026-08-17T08:02:48.824Z" }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/71/46/17f022dd3e953bf20a04a028a21ec746d942f8d2af30fa0f124fa0e6a684/pygments-2.21.0-py3-none-any.whl", hash = "sha256:2363c69b61c4a97c838da3b130dcd6468f4848992b21a82f2a63ec34377137d9", size = 1250147, upload-time = "2026-08-17T08:02:44.912Z" },
+]
+
+[[package]]
+name = "pylibftdi"
+version = "0.24.0"
+source = { registry = "https://pypi.org/simple" }
+sdist = { url = "https://files.pythonhosted.org/packages/19/5f/f0e03128161fff27d4f92d57b7fab20fa64e9bcd53627442d2ef43b8882c/pylibftdi-0.24.0.tar.gz", hash = "sha256:e2229bc10d077f018cbe7b2b490227b2b538643fa6f7bff132cde15549ca129b", size = 32255, upload-time = "2026-04-04T10:59:00.171Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/16/09/9891a561c1aedf31c546624f715e626cbb16b179be93514f7cb0abf07083/pylibftdi-0.24.0-py3-none-any.whl", hash = "sha256:8b3ba2a2106bc50a8bb551772433ebc7eb52d22a03c75fff6552de5ada6c4127", size = 33176, upload-time = "2026-04-04T10:58:58.997Z" },
 ]
 
 [[package]]

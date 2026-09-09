@@ -25,7 +25,8 @@ import serial
 from dae_RelayBoard import dae_RelayBoard_Common
 from serial.tools import list_ports
 
-#: FTDI's USB vendor id. Every Denkovi USB board is built around an FT232R.
+#: FTDI's USB vendor id. Every Denkovi USB board is built around an FTDI chip:
+#: an FT232R on the 4 and 16 relay boards, an FT245R on the 8 relay board.
 FTDI_VENDOR_ID = 0x0403
 
 #: Denkovi programs its boards with a serial number starting with this.
@@ -41,14 +42,18 @@ BOARD_TYPES = {
 #: Boards driven over a virtual COM port with the ASCII "//" protocol.
 VCP_BOARD_TYPES = (dae_RelayBoard.DAE_RELAYBOARD_TYPE_16,)
 
-#: Boards driven by bit-banging the FT232R through the D2XX driver.
-D2XX_BOARD_TYPES = (
+#: Boards driven by bit-banging the data lines of their FTDI chip.
+BITBANG_BOARD_TYPES = (
     dae_RelayBoard.DAE_RELAYBOARD_TYPE_4,
     dae_RelayBoard.DAE_RELAYBOARD_TYPE_8,
 )
 
 #: Default inter-command delay of the VCP protocol, in seconds.
 DEFAULT_DELAY = 0.05
+
+#: How long a board is listened to before it is probed, in seconds. Only long
+#: enough to catch a board that is already talking; it is dead time otherwise.
+LISTEN_TIMEOUT = 0.1
 
 
 class DenkoviError(Exception):
@@ -183,14 +188,24 @@ def probe_board_type(port: str, *, timeout: float = 1.0) -> str | None:
 
     Only the VCP boards can be identified over the wire: they answer the
     ``ask`` command with one status byte per eight relays. The bit-banged 4 and
-    8 relay boards are silent and indistinguishable from each other, so they
-    have to be named explicitly.
+    8 relay boards cannot be told apart from each other, so they have to be
+    named explicitly.
+
+    Nothing is written to a board that must not be written to. A bit-banged
+    board is a FIFO wearing a serial port's clothes: every byte written to it
+    lands on the relays, and 'ask//' would leave them holding a '/'. It gives
+    itself away by handing over bytes with nothing asked of it, which a board
+    that answers a protocol never does, so the port is listened to first and
+    only a port that stays quiet is spoken to.
     """
     try:
-        with serial.Serial(port=port, baudrate=9600, timeout=timeout) as connection:
+        with serial.Serial(port=port, baudrate=9600, timeout=LISTEN_TIMEOUT) as connection:
             time.sleep(DEFAULT_DELAY)
             connection.reset_input_buffer()
             connection.reset_output_buffer()
+            if connection.read(1):
+                return None
+            connection.timeout = timeout
             connection.write(b"ask//")
             time.sleep(DEFAULT_DELAY)
             reply = connection.read(2)
@@ -303,18 +318,27 @@ def open_board(
 ) -> Iterator[Board]:
     """Connect to a board, and disconnect again however the block exits."""
     port = device.port
-    if board_type in D2XX_BOARD_TYPES and not _has_d2xx_support():
+    bit_banged = board_type in BITBANG_BOARD_TYPES
+    if bit_banged and not _has_bitbang_support():
         raise DenkoviError(
-            f"the {board_type} board is driven through the FTDI D2XX driver, which the "
-            f"relay library only supports on Windows and Linux (this is {sys.platform}). "
+            f"the {board_type} board is driven by bit-banging its FTDI chip, which is "
+            f"implemented for Windows, macOS and Linux only (this is {sys.platform}). "
             "Only type16 boards can be used here."
         )
 
     try:
-        # Only the VCP boards take a command delay; the D2XX ones take no args.
+        # Only the VCP boards take a command delay; the bit-banged ones take no args.
         args = (delay,) if board_type in VCP_BOARD_TYPES else ()
         handle = dae_RelayBoard.DAE_RelayBoard(board_type, *args)
-        handle.initialise(port)
+        if bit_banged and sys.platform != "win32":
+            # The library has no backend for macOS, and the one it has for Linux
+            # can only find a board by a prefix of its serial number, so both are
+            # served by ours instead. Imported here to keep pylibftdi off the
+            # path of anyone who only ever touches a type16 board.
+            from .bitbang import BitBangBackend
+
+            handle.relayHandler.FTD2XX = BitBangBackend(device.serial_number)
+        handle.initialise(_initialise_argument(device, board_type))
     except dae_RelayBoard_Common.Denkovi_Exception as error:
         raise DenkoviError(f"could not connect to the board on {port}: {error}") from error
 
@@ -331,5 +355,22 @@ def open_board(
             handle.disconnect()
 
 
-def _has_d2xx_support() -> bool:
-    return sys.platform == "win32" or "linux" in sys.platform
+def _initialise_argument(device: Device, board_type: str) -> str:
+    """Return what the library's ``initialise`` wants for this board type.
+
+    The VCP boards are opened on their serial port. The bit-banged ones are not
+    reached through a serial port at all: they are looked up on the USB bus by
+    their FTDI serial number, and a board that only ``--port`` named may not
+    have one to give, in which case the Denkovi prefix picks the first board.
+    """
+    if board_type in VCP_BOARD_TYPES:
+        return device.port
+    return device.serial_number or DENKOVI_SERIAL_PREFIX
+
+
+def _has_bitbang_support() -> bool:
+    if sys.platform == "win32":
+        return True
+    from .bitbang import is_supported
+
+    return is_supported()
